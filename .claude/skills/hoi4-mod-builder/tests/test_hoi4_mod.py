@@ -1,5 +1,4 @@
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -311,6 +310,66 @@ class ValidateTests(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("first line must be 'l_english:'", out)
         self.assertIn("malformed localisation line", out)
+
+    def test_loc_header_follows_the_language_not_the_folder(self):
+        extra = self.mod / "localisation/german/testmod_l_german.yml"
+        write(extra, 'l_german:\n POR_test:0 "Hallo"\n', bom=True)
+        code, out = run("validate", str(self.mod))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("first line must be", out)
+        write(extra, 'l_english:\n POR_test:0 "Hallo"\n', bom=True)
+        code, out = run("validate", str(self.mod))
+        self.assertEqual(code, 1, out)
+        self.assertIn("first line must be 'l_german:'", out)
+
+    def test_loc_file_without_language_suffix_is_an_error(self):
+        path = self.mod / "localisation/german/testmod.yml"
+        write(path, 'l_german:\n POR_test:0 "Hallo"\n', bom=True)
+        code, out = run("validate", str(self.mod))
+        self.assertEqual(code, 1, out)
+        self.assertIn("localisation filenames must end with _l_<language>.yml", out)
+
+    def test_newline_escape_in_loc_is_allowed(self):
+        text = self.loc_file().read_text(encoding="utf-8-sig").replace(
+            'POR_lusitanian_awakening_desc:0 "', 'POR_lusitanian_awakening_desc:0 "First line.\\nSecond line. ', 1)
+        write(self.loc_file(), text, bom=True)
+        code, out = run("validate", str(self.mod))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("malformed", out)
+
+    def test_unescaped_quote_in_loc_is_a_warning(self):
+        text = self.loc_file().read_text(encoding="utf-8-sig")
+        write(self.loc_file(), text + ' POR_quote_test:0 "He said "hello" to them"\n', bom=True)
+        code, out = run("validate", str(self.mod))
+        self.assertEqual(code, 0, out)
+        self.assertIn("unescaped double quote", out)
+
+    def test_escaped_quote_in_loc_is_fine(self):
+        text = self.loc_file().read_text(encoding="utf-8-sig")
+        write(self.loc_file(), text + ' POR_quote_test:0 "He said \\"hello\\" to them"\n', bom=True)
+        code, out = run("validate", str(self.mod))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("unescaped double quote", out)
+
+    def test_idea_with_explicit_name_key_uses_that_key(self):
+        ideas = self.mod / "common/ideas/lusitanian_path_ideas.txt"
+        ideas.write_text(ideas.read_text(encoding="utf-8").replace(
+            "por_lusitanian_spirit = {", "por_lusitanian_spirit = {\n\t\t\tname = POR_lusitanian_awakening", 1),
+            encoding="utf-8")
+        # The idea's own key has no text now, so its name must come from the explicit key.
+        text = "\n".join(line for line in self.loc_file().read_text(encoding="utf-8-sig").splitlines()
+                         if not line.startswith(" por_lusitanian_spirit:0"))
+        write(self.loc_file(), text + "\n", bom=True)
+        code, out = run("validate", str(self.mod))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("name of idea por_lusitanian_spirit", out)
+        # With the explicit key's text gone as well, the warning names that key.
+        text = "\n".join(line for line in text.splitlines()
+                         if not line.startswith(" POR_lusitanian_awakening:0"))
+        write(self.loc_file(), text + "\n", bom=True)
+        code, out = run("validate", str(self.mod))
+        self.assertEqual(code, 0, out)
+        self.assertIn("no localisation for name of idea por_lusitanian_spirit (key 'POR_lusitanian_awakening')", out)
 
     def test_duplicate_focus_id_in_other_file(self):
         extra = self.mod / "common/national_focus/zz_extra.txt"

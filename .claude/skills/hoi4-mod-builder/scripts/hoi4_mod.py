@@ -3,13 +3,16 @@
 hoi4_mod.py - build and check Hearts of Iron IV mods.
 
 Commands
-  build    SPEC.json (--user-dir DIR | --out DIR) [--no-validate]
+  build    SPEC.json (--user-dir DIR | --out DIR) [--no-validate] [--preview PNG]
            Writes a complete mod from a JSON spec (see reference/spec-format.md),
            then validates the result. With --user-dir the mod is written to
            DIR/mod/<slug>/ and a launcher descriptor DIR/mod/<slug>.mod is added.
+           A "world" object in the spec also writes a generated map, countries and
+           a start bookmark (see reference/custom-worlds.md); --preview saves a PNG.
   validate MOD_DIR [--strict]
            Parses every script, .gfx and localisation file in a mod folder and
            reports syntax errors, broken references and common loading mistakes.
+           A folder with map/definition.csv also gets the map and country checks.
 
 Standard library only (Python 3.8+).
 Exit codes: 0 = no errors; 1 = validation errors (or warnings with --strict);
@@ -22,6 +25,9 @@ import json
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # hoi4_world.py sits next to this file
+import hoi4_world  # noqa: E402
 
 MANIFEST_NAME = ".hoi4-builder-manifest.json"
 DEFAULT_ICON = "GFX_goal_generic_construct_infrastructure"
@@ -217,7 +223,12 @@ def to_int(text, default):
 # Spec handling (build)
 # ============================================================================
 
-TOP_KEYS = ("mod", "focus_trees", "events", "decisions", "ideas", "sprites", "localisation")
+TOP_KEYS = ("mod", "focus_trees", "events", "decisions", "ideas", "sprites", "localisation", "world")
+WORLD_KEYS = ("seed", "width", "height", "land_ratio", "province_size", "state_size", "region_size",
+              "sea_region_size", "max_continents", "countries", "start")
+WORLD_COUNTRY_KEYS = ("tag", "name", "ideology", "color")
+WORLD_START_KEYS = ("date", "name", "desc", "default_country")
+WORLD_NAME_FORBIDDEN = '"\\/:*?<>|'
 
 
 class SpecChecker:
@@ -493,7 +504,113 @@ def normalise(spec, chk):
         if model["events"]:
             auto.append("Events")
         model["mod"]["tags"] = auto or ["Gameplay"]
+
+    # ---- custom world (map, countries, start bookmark) ------------------------
+    if "world" in spec:
+        model["world"] = normalise_world(spec["world"], model["mod"], chk)
     return model
+
+
+def normalise_world(w, mod, chk):
+    """Check the optional `world` object; return generator settings, or None if unusable."""
+    where = "world"
+    if not isinstance(w, dict):
+        chk.err(where, "must be an object (see reference/custom-worlds.md)")
+        return None
+    chk.unknown_keys(where, w, WORLD_KEYS)
+
+    def whole(key, default, lo, hi, multiple=1):
+        v = w.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, int):
+            chk.err(f"{where}.{key}", "must be a whole number")
+            return default
+        if not lo <= v <= hi:
+            chk.err(f"{where}.{key}", f"must be between {lo} and {hi}")
+            return default
+        if v % multiple:
+            chk.err(f"{where}.{key}", f"must be a multiple of {multiple} (HOI4 map files use 256-pixel steps)")
+            return default
+        return v
+
+    def fraction(key, default, lo, hi):
+        v = w.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+            chk.err(f"{where}.{key}", f"must be a number between {lo} and {hi}")
+            return default
+        return float(v)
+
+    seed = whole("seed", 1, 0, 2 ** 31 - 1)
+    width = whole("width", 1024, 256, 4096, multiple=256)
+    height = whole("height", 512, 256, 4096, multiple=256)
+    if width * height > hoi4_world.GENERATOR_MAX_PIXELS:
+        chk.err(where, "width x height must be at most 4194304 pixels (2048 x 2048)")
+    settings = {
+        "land_ratio": fraction("land_ratio", 0.35, 0.1, 0.8),
+        "province_size": whole("province_size", 400, 20, 20000),
+        "state_size": whole("state_size", 5, 1, 60),
+        "region_size": whole("region_size", 12, 1, 200),
+        "sea_region_size": whole("sea_region_size", 24, 1, 500),
+        "max_continents": whole("max_continents", 6, 1, 12),
+    }
+
+    countries_in = w.get("countries")
+    if not isinstance(countries_in, list) or not 1 <= len(countries_in) <= 40:
+        chk.err(f"{where}.countries", "must be a list of 1 to 40 countries")
+        countries_in = []
+    countries = []
+    seen_tags = set()
+    for i, c in enumerate(countries_in):
+        cw = f"{where}.countries[{i}]"
+        if not isinstance(c, dict):
+            chk.err(cw, "must be an object")
+            continue
+        chk.unknown_keys(cw, c, WORLD_COUNTRY_KEYS)
+        tag = c.get("tag")
+        if not isinstance(tag, str) or not TAG_RE.match(tag):
+            chk.err(f"{cw}.tag", "must be 3 capital letters or digits, such as ZAL")
+            tag = f"Z{i:02d}"[:3]
+        elif tag in seen_tags:
+            chk.err(f"{cw}.tag", f"duplicate country tag {tag}")
+        seen_tags.add(tag)
+        name = c.get("name")
+        if not isinstance(name, str) or not name.strip() or any(ch in name for ch in WORLD_NAME_FORBIDDEN):
+            chk.err(f"{cw}.name", "required; must not contain quotes, slashes or : * ? < > |")
+            name = tag
+        ideology = c.get("ideology", hoi4_world.IDEOLOGIES[i % len(hoi4_world.IDEOLOGIES)])
+        if ideology not in hoi4_world.IDEOLOGIES:
+            chk.err(f"{cw}.ideology", "must be democratic, fascism, communism or neutrality")
+            ideology = "neutrality"
+        color = c.get("color")
+        if color is not None and not (isinstance(color, list) and len(color) == 3 and all(
+                isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255 for v in color)):
+            chk.err(f"{cw}.color", "must be [red, green, blue] with values 0-255")
+            color = None
+        countries.append({"tag": tag, "name": name, "ideology": ideology, "color": color})
+
+    start_in = w.get("start", {})
+    if not isinstance(start_in, dict):
+        chk.err(f"{where}.start", "must be an object")
+        start_in = {}
+    chk.unknown_keys(f"{where}.start", start_in, WORLD_START_KEYS)
+    date = start_in.get("date", hoi4_world.DEFAULT_START_DATE)
+    match = hoi4_world.DATE_RE.match(date) if isinstance(date, str) else None
+    if not match or not (2 <= int(match.group(1)) <= 9999 and 1 <= int(match.group(2)) <= 12
+                         and 1 <= int(match.group(3)) <= 31 and 0 <= int(match.group(4) or 12) <= 23):   # the hour is optional; 12 is the usual start
+        chk.err(f"{where}.start.date", "must look like 1936.1.1.12 or 1936.1.1 (year.month.day[.hour]; year 2 or later)")
+        date = hoi4_world.DEFAULT_START_DATE
+    start_name = opt_str(chk, f"{where}.start", start_in, "name") or mod["name"]
+    start_desc = opt_str(chk, f"{where}.start", start_in, "desc") or f"{mod['name']}, as it stands at the start."
+    default_country = start_in.get("default_country", countries[0]["tag"] if countries else None)
+    if countries and default_country not in seen_tags:
+        chk.err(f"{where}.start.default_country", f"{default_country!r} is not one of the countries listed")
+        default_country = countries[0]["tag"]
+
+    if chk.errors and any(e.startswith(where) for e in chk.errors):
+        return None
+    return dict(settings, seed=seed, width=width, height=height, countries=countries,
+                start={"date": date, "name": start_name, "desc": start_desc,
+                       "default_country": default_country},
+                prefix=mod["slug"].upper(), slug=mod["slug"])
 
 
 def normalise_focus(w, f, chk):
@@ -858,7 +975,7 @@ def gfx_script(sprites):
     return "\n".join(out) + "\n"
 
 
-def descriptor_text(mod, path=None):
+def descriptor_text(mod, path=None, replace_paths=()):
     lines = [f'name="{mod["name"]}"']
     if path:
         lines.append(f'path="{path}"')
@@ -870,6 +987,8 @@ def descriptor_text(mod, path=None):
         lines.extend(f'\t"{t}"' for t in mod["tags"])
         lines.append("}")
     lines.append(f'supported_version="{mod["supported_version"]}"')
+    # replace_path empties a base-game folder, so a custom world does not mix with the real map and countries
+    lines.extend(f'replace_path="{p}"' for p in replace_paths)
     return "\n".join(lines) + "\n"
 
 
@@ -945,9 +1064,23 @@ def render_mod(model, chk):
 
     for k, v in model["loc_extra"].items():
         loc.add(k, v, "localisation")
+
+    replace_paths = ()
+    if model.get("world"):
+        try:
+            world = hoi4_world.build_world(model["world"])
+        except hoi4_world.WorldError as exc:
+            chk.err("world", str(exc))
+            return files
+        world_files, world_loc, replace_paths = hoi4_world.world_files(world)
+        files.update(world_files)
+        for key, text in world_loc:
+            loc.add(key, text, "world")
+        model["world_obj"] = world
+        model["replace_paths"] = replace_paths
     files[f"localisation/english/{slug}_l_english.yml"] = loc.render()
 
-    files["descriptor.mod"] = descriptor_text(mod).encode("utf-8")
+    files["descriptor.mod"] = descriptor_text(mod, replace_paths=replace_paths).encode("utf-8")
     return files
 
 
@@ -1015,10 +1148,21 @@ def cmd_build(args):
     print(f"Wrote {len(files)} files to {root}")
     for rel in sorted(files):
         print(f"  {rel}")
+    world = model.get("world_obj")
+    if world is not None:
+        print(f"World: {world.summary()}")
+    if args.preview:
+        if world is None:
+            print("[WARN] --preview needs a \"world\" in the spec; no picture was written")
+        else:
+            Path(args.preview).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.preview).write_bytes(hoi4_world.preview_png(world))
+            print(f"Preview picture: {args.preview} (a rough picture of the map; not the game's view)")
     if user_dir is not None:
         launcher = user_dir / "mod" / f"{slug}.mod"
         launcher.parent.mkdir(parents=True, exist_ok=True)
-        launcher.write_text(descriptor_text(model["mod"], path=launcher_path(root, user_dir)), encoding="utf-8")
+        launcher.write_text(descriptor_text(model["mod"], path=launcher_path(root, user_dir),
+                                            replace_paths=model.get("replace_paths", ())), encoding="utf-8")
         print(f"Launcher descriptor: {launcher}")
     if args.no_validate:
         return 0
@@ -1123,6 +1267,9 @@ def icon_names(node):
     return [c.key for c in node.value if c.key]
 
 
+LOC_FILE_RE = re.compile(r"_l_([a-z_]+)\.yml$")   # the language comes from the file name; the folder is free
+
+
 def check_loc_file(rel, path, rep, st):
     if path.read_bytes()[:3] != b"\xef\xbb\xbf":
         rep.add("ERROR", rel, 1, "localisation file has no UTF-8 BOM - save it as 'UTF-8-BOM' or the game may ignore it")
@@ -1130,19 +1277,24 @@ def check_loc_file(rel, path, rep, st):
     if text is None:
         rep.add("ERROR", rel, 1, info)
         return
-    parts = rel.split("/")
-    language = parts[1] if len(parts) > 2 else "english"
-    if language == "english" and not path.name.endswith("_l_english.yml"):
-        rep.add("ERROR", rel, 1, "English localisation filenames must end with _l_english.yml (lowercase L)")
+    match = LOC_FILE_RE.search(path.name)
+    if match is None:
+        want = ("English localisation filenames must end with _l_english.yml" if "/english/" in rel
+                else "localisation filenames must end with _l_<language>.yml")
+        rep.add("ERROR", rel, 1, f"{want} (lowercase L); the game ignores files without a language name")
+        language = None
+    else:
+        language = match.group(1)
     lines = text.splitlines()
     header_line = next((i for i, ln in enumerate(lines, 1) if ln.strip() and not ln.strip().startswith("#")), None)
     if header_line is None:
-        rep.add("ERROR", rel, 1, f"localisation file is empty; its first line must be 'l_{language}:'")
+        rep.add("ERROR", rel, 1, "localisation file is empty; its first line must be 'l_<language>:'")
         return
-    expected = f"l_{language}:"
-    if lines[header_line - 1].split("#")[0].strip() != expected:
-        rep.add("ERROR", rel, header_line,
-                f"first line must be '{expected}' (found '{lines[header_line - 1].strip()[:40]}')")
+    if language is not None:
+        expected = f"l_{language}:"
+        if lines[header_line - 1].split("#")[0].strip() != expected:
+            rep.add("ERROR", rel, header_line,
+                    f"first line must be '{expected}' (found '{lines[header_line - 1].strip()[:40]}')")
     for i, line in enumerate(lines, 1):
         s = line.strip()
         if not s or s.startswith("#") or i == header_line:
@@ -1152,10 +1304,8 @@ def check_loc_file(rel, path, rep, st):
             rep.add("ERROR", rel, i, 'malformed localisation line (expected:  key:0 "text")')
             continue
         key, value = m.group(1), m.group(3)
-        if '"' in value:
-            rep.add("WARN", rel, i, "double quote inside the text; use ' or typographic quotes to be safe")
-        if "\\n" in value:
-            rep.add("WARN", rel, i, "newlines do not work inside localisation strings")
+        if re.search(r'(?<!\\)"', value):   # \" is fine; a bare quote ends the string early
+            rep.add("WARN", rel, i, 'unescaped double quote inside the text; write \\" so the string does not end early')
         st.loc.setdefault(key, []).append((rel, i, value))
 
 
@@ -1235,8 +1385,11 @@ def collect_ideas(rel, nodes, st):
                     st.ideas.append({"id": idea.key, "file": rel, "line": idea.line, "picture": picture})
                     if picture:  # the game looks for GFX_idea_<picture>
                         st.sprite_needed.append((f"GFX_idea_{picture}", rel, idea.line, f"picture of idea {idea.key}"))
-                    st.loc_needed.append((idea.key, rel, idea.line, "WARN", f"name of idea {idea.key}"))
-                    st.loc_needed.append((idea.key + "_desc", rel, idea.line, "INFO", f"description of idea {idea.key}"))
+                    # name and desc default to the idea id, but an explicit key wins (Beyond Earth shares one name)
+                    name_key = scalar(first(idea.value, "name")) or idea.key
+                    desc_key = scalar(first(idea.value, "desc")) or idea.key + "_desc"
+                    st.loc_needed.append((name_key, rel, idea.line, "WARN", f"name of idea {idea.key}"))
+                    st.loc_needed.append((desc_key, rel, idea.line, "INFO", f"description of idea {idea.key}"))
 
 
 def collect_events(rel, nodes, rep, st):
@@ -1515,6 +1668,10 @@ def validate_mod(root):
             continue  # base-game event picture
         rep.add("WARN", rel, line, f"{what}: sprite {name} is not defined in this mod (fine only for base-game sprites)")
 
+    # ---- custom maps and worlds (any folder with map/definition.csv) ------------
+    if (root / "map" / "definition.csv").is_file():
+        hoi4_world.check_world(root, rep, st, parse_script)
+
     # ---- localisation coverage -----------------------------------------------
     reported = set()
     missing_desc = {}  # file -> count of descriptions without localisation (summarised as one note)
@@ -1556,6 +1713,7 @@ def main(argv=None):
     b.add_argument("--user-dir", help="HOI4 user folder: writes DIR/mod/<slug>/ and DIR/mod/<slug>.mod")
     b.add_argument("--out", help="write the mod folder here instead (no launcher file is written)")
     b.add_argument("--no-validate", action="store_true", help="skip the validation pass")
+    b.add_argument("--preview", metavar="PNG", help="for a spec with a \"world\": also save a PNG picture of the map")
     b.set_defaults(func=cmd_build)
 
     v = sub.add_parser("validate", help="check an existing mod folder")

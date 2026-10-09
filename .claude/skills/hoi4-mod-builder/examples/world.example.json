@@ -1,0 +1,32 @@
+{
+  "mod": {
+    "name": "Atlantic Frontier",
+    "slug": "atlantic_frontier",
+    "version": "0.1.0",
+    "supported_version": "1.19.*",
+    "tags": ["Alternative History", "Map"]
+  },
+  "world": {
+    "seed": 2026,
+    "width": 1024,
+    "height": 512,
+    "land_ratio": 0.35,
+    "province_size": 400,
+    "state_size": 5,
+    "region_size": 12,
+    "sea_region_size": 24,
+    "max_continents": 6,
+    "countries": [
+      {"tag": "ATL", "name": "Atlantia", "ideology": "democratic", "color": [226, 176, 58]},
+      {"tag": "CRL", "name": "Carlon", "ideology": "fascism", "color": [170, 52, 52]},
+      {"tag": "DRN", "name": "Dornmark", "ideology": "communism", "color": [120, 60, 160]},
+      {"tag": "NVR", "name": "Novara", "ideology": "neutrality", "color": [110, 160, 90]}
+    ],
+    "start": {
+      "date": "1936.1.1.12",
+      "name": "Atlantic Frontier, 1936",
+      "desc": "Four powers share a new archipelago at the edge of the Atlantic.",
+      "default_country": "ATL"
+    }
+  }
+}

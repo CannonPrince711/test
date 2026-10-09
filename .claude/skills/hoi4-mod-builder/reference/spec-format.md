@@ -1,7 +1,8 @@
 # JSON spec format
 
 `scripts/hoi4_mod.py build SPEC.json` turns this file into a complete mod. Start from
-`examples/spec.example.json`. Unknown keys are rejected with a "did you mean" hint, and the
+`examples/spec.example.json`, or from `examples/world.example.json` for a custom world (see
+`custom-worlds.md`). Unknown keys are rejected with a "did you mean" hint, and the
 build writes nothing if the spec has errors.
 
 Every ID must match `[A-Za-z_][A-Za-z0-9_]*` (event IDs: `<namespace>.<integer>`).
@@ -18,6 +19,7 @@ Every text value is plain English text with **no double quotes** (use `'` or cur
 | `ideas` | no | List of idea categories (national spirits are category `country`). |
 | `sprites` | no | Extra sprite definitions for textures you ship in the mod. |
 | `localisation` | no | Extra `KEY: "text"` pairs written to the English loc file. |
+| `world` | no | A generated custom map with countries and a start bookmark. See the `world` section below and `custom-worlds.md`. |
 
 ## `mod`
 
@@ -141,6 +143,29 @@ A value starting with `GFX_idea_` is accepted and the prefix is stripped.
 The texture file must exist in the mod folder. The build writes the sprite definition
 regardless, so a missing file shows up as a warning, not an error.
 
+## `world`
+
+Generates a whole map with countries and a start bookmark from a seed. The full guide, including what
+is generated and what is not, is `custom-worlds.md`. Every key is optional except `countries`.
+
+| Key | Default | Notes |
+|---|---|---|
+| `seed` | `1` | Whole number, 0 to 2147483647. The same seed and sizes give the same files. |
+| `width`, `height` | `1024`, `512` | Multiples of 256, from 256 to 4096 each. Width × height at most 4194304. |
+| `land_ratio` | `0.35` | Land share, 0.1 to 0.8. Approximate. |
+| `province_size` | `400` | Target province size in pixels, 20 to 20000. Smaller means more provinces (60,000 at most). |
+| `state_size` | `5` | Provinces per state, 1 to 60. |
+| `region_size` | `12` | Land provinces per strategic region, 1 to 200. |
+| `sea_region_size` | `24` | Sea provinces per strategic region, 1 to 500. |
+| `max_continents` | `6` | Largest land masses that become continents, 1 to 12. |
+| `countries[]` | required | 1 to 40 countries. Each has `tag` (required; 3 capital letters or digits, unique), `name` (required; no quotes, slashes or `: * ? < > \|`), `ideology` (`democratic`, `fascism`, `communism` or `neutrality`; if omitted they cycle in list order) and `color` (`[red, green, blue]`, 0 to 255; if omitted, drawn from the seed). |
+| `start.date` | `1936.1.1.12` | `year.month.day`, with an optional `.hour`. `1936-01-01` is refused. |
+| `start.name`, `start.desc` | mod name; "<mod name>, as it stands at the start." | The bookmark's title and description. |
+| `start.default_country` | first country | The country the player starts as. Must be in `countries`. |
+
+A world replaces the base game's map. Other sections in the same spec (focus trees, events, decisions,
+ideas) should use the world's country tags.
+
 ## What `build` writes
 
 For slug `por_path` (namespace `por_events`):
@@ -156,6 +181,9 @@ interface/por_path_sprites.gfx          (only if sprites are given)
 localisation/english/por_path_l_english.yml
 .hoi4-builder-manifest.json             (lists the files this build made)
 ```
+
+With a `world`, the build also writes the map folder, the strategic regions and states, the country files
+and a start bookmark (see `custom-worlds.md`). `--preview PNG` writes a rough picture of the map.
 
 With `--user-dir DIR` the mod folder is `DIR/mod/<slug>/` and the launcher file is `DIR/mod/<slug>.mod`.
 Re-running `build` overwrites these generated files and deletes files from a previous build that the
