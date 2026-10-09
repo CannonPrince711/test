@@ -9,8 +9,14 @@ countries and a start date) from a short JSON spec, then validates the result.
 
 - **Use it in this repo:** Claude Code loads project skills from `.claude/skills/` automatically. Ask for a
   Hearts of Iron IV mod or focus tree.
-- **Use it elsewhere:** copy `.claude/skills/hoi4-mod-builder/` into `~/.claude/skills/`, or zip the folder and
-  add it through Claude's skill settings.
+- **Use it elsewhere:** copy `.claude/skills/hoi4-mod-builder/` into `~/.claude/skills/`. To upload it through
+  Claude's skill settings, zip the `hoi4-mod-builder` folder itself, not the repository. The archive's only
+  top-level entry must be `hoi4-mod-builder/`, with `SKILL.md` directly inside it. On macOS or Linux, from the
+  repository root:
+
+  ```
+  cd .claude/skills && zip -r ~/hoi4-mod-builder.zip hoi4-mod-builder -x "*/__pycache__/*"
+  ```
 
 ### Run the tool directly
 
