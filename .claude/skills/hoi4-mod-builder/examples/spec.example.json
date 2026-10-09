@@ -1,0 +1,185 @@
+{
+  "mod": {
+    "name": "Lusitanian Path",
+    "slug": "lusitanian_path",
+    "version": "0.1.0",
+    "supported_version": "1.19.*",
+    "tags": ["Alternative History", "National Focuses", "Events"]
+  },
+
+  "focus_trees": [
+    {
+      "id": "POR_lusitanian_path_focus",
+      "country": "POR",
+      "default": false,
+      "score": 10,
+      "focuses": [
+        {
+          "id": "POR_lusitanian_awakening",
+          "name": "Lusitanian Awakening",
+          "desc": "Lisbon's councils open a national debate about what Portugal should become once the old order has run its course.",
+          "icon": "GFX_goal_generic_construct_infrastructure",
+          "cost": 5,
+          "x": 0,
+          "y": 0,
+          "search_filters": ["FOCUS_FILTER_POLITICAL"],
+          "completion_reward": [
+            "add_political_power = 50",
+            "add_stability = 0.02",
+            "set_country_flag = por_lusitanian_awakening_done"
+          ]
+        },
+        {
+          "id": "POR_republican_road",
+          "name": "The Republican Road",
+          "desc": "Reformers draft a constitution that places parliament above the crown.",
+          "icon": "GFX_goal_generic_dangerous_deal",
+          "cost": 7,
+          "x": -1,
+          "y": 1,
+          "prerequisites": ["POR_lusitanian_awakening"],
+          "mutually_exclusive": ["POR_crown_restoration"],
+          "search_filters": ["FOCUS_FILTER_POLITICAL"],
+          "available": ["has_political_power > 25"],
+          "completion_reward": [
+            "add_popularity = { ideology = democratic popularity = 0.05 }",
+            "add_political_power = 75"
+          ]
+        },
+        {
+          "id": "POR_crown_restoration",
+          "name": "Crown Restoration",
+          "desc": "Monarchists argue that continuity, not revolution, will hold the empire together.",
+          "icon": "GFX_goal_generic_allies_build_infantry",
+          "cost": 7,
+          "x": 1,
+          "y": 1,
+          "prerequisites": ["POR_lusitanian_awakening"],
+          "mutually_exclusive": ["POR_republican_road"],
+          "search_filters": ["FOCUS_FILTER_POLITICAL"],
+          "completion_reward": [
+            "add_political_power = 75",
+            "add_stability = 0.03"
+          ]
+        },
+        {
+          "id": "POR_naval_bridge",
+          "name": "The Naval Bridge",
+          "desc": "Whichever road was taken, the ports must be modernised before Portugal can claim its overseas holdings.",
+          "icon": "GFX_goal_generic_construct_infrastructure",
+          "cost": 6,
+          "x": 0,
+          "y": 2,
+          "prerequisites": [["POR_republican_road", "POR_crown_restoration"]],
+          "search_filters": ["FOCUS_FILTER_INDUSTRY"],
+          "completion_reward": [
+            "add_political_power = 40",
+            "add_stability = 0.01"
+          ]
+        },
+        {
+          "id": "POR_overseas_empire",
+          "name": "A Constitutional Empire",
+          "desc": "With a settled government and a modern navy, Lisbon turns its gaze back to the colonies.",
+          "icon": "GFX_goal_generic_dangerous_deal",
+          "cost": 10,
+          "x": 0,
+          "y": 1,
+          "relative_to": "POR_naval_bridge",
+          "prerequisites": ["POR_naval_bridge"],
+          "search_filters": ["FOCUS_FILTER_POLITICAL"],
+          "completion_reward": [
+            "add_political_power = 100",
+            "hidden_effect = {\n    set_country_flag = por_overseas_empire_done\n}"
+          ]
+        }
+      ]
+    }
+  ],
+
+  "events": [
+    {
+      "namespace": "por_events",
+      "events": [
+        {
+          "id": "por_events.1",
+          "type": "country_event",
+          "title": "The Lisbon Councils Convene",
+          "desc": "Delegates from every province have arrived in Lisbon. Their question is simple and dangerous: who should hold the final say over the nation?",
+          "picture": "GFX_report_event_generic_read_write",
+          "fire_only_once": true,
+          "trigger": ["tag = POR", "has_completed_focus = POR_lusitanian_awakening"],
+          "options": [
+            {
+              "text": "Let the people's assembly decide",
+              "effects": [
+                "add_political_power = 25",
+                "add_popularity = { ideology = democratic popularity = 0.03 }"
+              ]
+            },
+            {
+              "text": "The crown will guide the debate",
+              "effects": [
+                "add_political_power = 25",
+                "add_popularity = { ideology = neutrality popularity = 0.03 }"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "por_events.2",
+          "type": "country_event",
+          "hidden": true,
+          "fire_only_once": true,
+          "mean_time_to_happen": ["days = 60"],
+          "trigger": ["tag = POR", "has_completed_focus = POR_naval_bridge"],
+          "immediate": ["add_stability = 0.01"]
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "category": "por_homeland_affairs",
+      "name": "Homeland Affairs",
+      "desc": "Decisions that shape daily life inside Portugal.",
+      "allowed": ["original_tag = POR"],
+      "visible_when_empty": false,
+      "items": [
+        {
+          "id": "por_declare_liberty_day",
+          "name": "Declare Liberty Day",
+          "desc": "A national holiday that celebrates the new constitution and reminds citizens of their rights.",
+          "cost": 25,
+          "fire_only_once": true,
+          "days_remove": 30,
+          "available": ["has_war = no"],
+          "complete_effect": [
+            "add_stability = 0.02",
+            "add_war_support = -0.01"
+          ],
+          "ai_will_do": ["factor = 5"]
+        }
+      ]
+    }
+  ],
+
+  "ideas": [
+    {
+      "category": "country",
+      "items": [
+        {
+          "id": "por_lusitanian_spirit",
+          "name": "Lusitanian Spirit",
+          "desc": "A proud, outward-looking national identity that rewards patient reform.",
+          "allowed": ["original_tag = POR"],
+          "modifier": [
+            "stability_factor = 0.05",
+            "political_power_gain = 0.1"
+          ]
+        }
+      ]
+    }
+  ]
+}
